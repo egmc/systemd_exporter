@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strconv"
 
 	// Register pprof-over-http handlers
 	_ "net/http/pprof"
@@ -31,6 +32,8 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+
+	godbus "github.com/godbus/dbus/v5"
 )
 
 const namespace = "systemd"
@@ -259,6 +262,11 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 	defer conn.Close()
 
+	dnsStats := gatherStatsDbus(true)
+	convertedMap := convertMap(dnsStats)
+
+	log.With(c.logger, "stats", convertedMap).Log("mgs", "sss")
+
 	allUnits, err := conn.ListUnitsContext(c.ctx)
 	if err != nil {
 		return errors.Wrap(err, "could not get list of systemd units from dbus")
@@ -283,6 +291,59 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 	wg.Wait()
 	return nil
+}
+
+func convertMap(originalMap map[string]float64) map[string]string {
+	convertedMap := make(map[string]string)
+
+	for key, value := range originalMap {
+		// float64を文字列に変換
+		strValue := strconv.FormatFloat(value, 'f', -1, 64)
+		convertedMap[key] = strValue
+		fmt.Println("key:", key)
+		fmt.Println("val:", strValue)
+	}
+
+	return convertedMap
+}
+
+func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
+	stats := make(map[string]float64)
+
+	conn, _ := godbus.ConnectSystemBus()
+	defer conn.Close()
+
+	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
+
+	cacheStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
+	stats["Current Cache Size"] = cacheStats[0]
+	stats["Cache Hits"] = cacheStats[1]
+	stats["Cache Misses"] = cacheStats[2]
+
+	transactionStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
+	stats["Current Transactions"] = transactionStats[0]
+	stats["Total Transactions"] = transactionStats[1]
+
+	if gatherDNSSec {
+		dnssecStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
+		stats["Secure"] = dnssecStats[0]
+		stats["Insecure"] = dnssecStats[1]
+		stats["Bogus"] = dnssecStats[2]
+		stats["Indeterminate"] = dnssecStats[3]
+	}
+
+	return stats
+}
+func parseProperty(object godbus.BusObject, path string) (ret []float64, err error) {
+	variant, err := object.GetProperty(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range variant.Value().([]interface{}) {
+		i := v.(uint64)
+		ret = append(ret, float64(i))
+	}
+	return ret, err
 }
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
