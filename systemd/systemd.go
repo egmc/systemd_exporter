@@ -330,6 +330,18 @@ func parseUnitType(unit dbus.UnitStatus) string {
 	return t[len(t)-1]
 }
 
+func parseProperty(object godbus.BusObject, path string) (ret []float64, err error) {
+	variant, err := object.GetProperty(path)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range variant.Value().([]interface{}) {
+		i := v.(uint64)
+		ret = append(ret, float64(i))
+	}
+	return ret, err
+}
+
 func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	begin := time.Now()
 	conn, err := c.newDbus()
@@ -337,14 +349,6 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 		return errors.Wrapf(err, "couldn't get dbus connection")
 	}
 	defer conn.Close()
-
-	if *enableResolvedgMetrics {
-		err := c.collectResolvedMetrics(ch)
-		if err != nil {
-			return errors.Wrapf(err, "couldn't get resolved metrics")
-		}
-
-	}
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
 	if err != nil {
@@ -369,66 +373,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 
 	wg.Wait()
+
+	if *enableResolvedgMetrics {
+		err := c.collectResolvedMetrics(ch)
+		if err != nil {
+			return errors.Wrapf(err, "couldn't get resolved metrics")
+		}
+	}
+
 	return nil
-}
-
-func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
-
-	conn, err := godbus.ConnectSystemBus()
-	if err != nil {
-		return err
-	}
-
-	defer conn.Close()
-
-	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
-
-	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
-	if err != nil {
-		return err
-	}
-
-	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentCacheSize, prometheus.GaugeValue,
-		float64(cacheStats[0]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheHits, prometheus.CounterValue,
-		float64(cacheStats[1]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheMisses, prometheus.CounterValue,
-		float64(cacheStats[2]))
-
-	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
-	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentTransactions, prometheus.GaugeValue,
-		float64(transactionStats[0]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalTransactions, prometheus.CounterValue,
-		float64(transactionStats[1]))
-	if err != nil {
-		return err
-	}
-
-	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalSecure, prometheus.CounterValue,
-		float64(dnssecStats[0]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalInsecure, prometheus.CounterValue,
-		float64(dnssecStats[1]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalBogus, prometheus.CounterValue,
-		float64(dnssecStats[2]))
-	ch <- prometheus.MustNewConstMetric(c.resolvedTotalIndeterminate, prometheus.CounterValue,
-		float64(dnssecStats[3]))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func parseProperty(object godbus.BusObject, path string) (ret []float64, err error) {
-	variant, err := object.GetProperty(path)
-	if err != nil {
-		return nil, err
-	}
-	for _, v := range variant.Value().([]interface{}) {
-		i := v.(uint64)
-		ret = append(ret, float64(i))
-	}
-	return ret, err
 }
 
 func (c *Collector) collectUnit(conn *dbus.Conn, ch chan<- prometheus.Metric, unit dbus.UnitStatus) error {
@@ -737,6 +690,53 @@ func (c *Collector) collectTimerTriggerTime(conn *dbus.Conn, ch chan<- prometheu
 	ch <- prometheus.MustNewConstMetric(
 		c.timerLastTriggerDesc, prometheus.GaugeValue,
 		float64(val)/1e6, unit.Name)
+	return nil
+}
+
+func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
+
+	conn, err := godbus.ConnectSystemBus()
+	if err != nil {
+		return err
+	}
+
+	defer conn.Close()
+
+	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
+
+	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
+	if err != nil {
+		return err
+	}
+
+	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentCacheSize, prometheus.GaugeValue,
+		float64(cacheStats[0]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheHits, prometheus.CounterValue,
+		float64(cacheStats[1]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheMisses, prometheus.CounterValue,
+		float64(cacheStats[2]))
+
+	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
+	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentTransactions, prometheus.GaugeValue,
+		float64(transactionStats[0]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalTransactions, prometheus.CounterValue,
+		float64(transactionStats[1]))
+	if err != nil {
+		return err
+	}
+
+	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalSecure, prometheus.CounterValue,
+		float64(dnssecStats[0]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalInsecure, prometheus.CounterValue,
+		float64(dnssecStats[1]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalBogus, prometheus.CounterValue,
+		float64(dnssecStats[2]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalIndeterminate, prometheus.CounterValue,
+		float64(dnssecStats[3]))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
