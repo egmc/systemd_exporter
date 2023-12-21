@@ -199,34 +199,34 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
 	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
 
-	// stats
+	// resolved metrics
 	resolvedCurrentTransactions := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_current_transactions"),
 		"Resolved Current Transactions",
-		[]string{"name"}, nil,
+		nil, nil,
 	)
 	resolvedTotalTransactions := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_transactions_total"),
 		"Resolved Total Transactions",
-		[]string{"name"}, nil,
+		nil, nil,
 	)
 
 	resolvedCurrentCacheSize := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_current_cache_size"),
 		"Resolved Current Cache Size",
-		[]string{"name"}, nil,
+		nil, nil,
 	)
 
 	resolvedTotalCacheHits := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_cache_hits_total"),
 		"Resolved Total Cache Hits",
-		[]string{"name"}, nil,
+		nil, nil,
 	)
 
 	resolvedTotalCacheMisses := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_cache_misses_total"),
 		"Resolved Total Cache Misses",
-		[]string{"name"}, nil,
+		nil, nil,
 	)
 
 	// TODO: Build a custom handler to pass in the scrape http context.
@@ -316,6 +316,11 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 
 		convertedMap := convertMap(dnsStats)
 
+		err := c.collectResolvedMetrics(ch)
+		if err != nil {
+			return errors.Wrapf(err, "couldn't get resolved metrics")
+		}
+
 		log.With(c.logger, "stats", convertedMap).Log("mgs", "sss")
 
 	}
@@ -358,6 +363,31 @@ func convertMap(originalMap map[string]float64) map[string]string {
 	}
 
 	return convertedMap
+}
+
+func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
+
+	conn, _ := godbus.ConnectSystemBus()
+	defer conn.Close()
+
+	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
+
+	cacheStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
+
+	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentCacheSize, prometheus.GaugeValue,
+		float64(cacheStats[0]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheHits, prometheus.CounterValue,
+		float64(cacheStats[1]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheMisses, prometheus.CounterValue,
+		float64(cacheStats[2]))
+
+	transactionStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
+	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentTransactions, prometheus.GaugeValue,
+		float64(transactionStats[0]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalTransactions, prometheus.CounterValue,
+		float64(transactionStats[1]))
+
+	return nil
 }
 
 func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
