@@ -45,6 +45,7 @@ var (
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
+	enableResolvedgMetrics    = kingpin.Flag("systemd.collector.enable-systemd-resolved-stats", "Enable systemd-resolved statistics").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
@@ -83,6 +84,12 @@ type Collector struct {
 
 	unitIncludePattern *regexp.Regexp
 	unitExcludePattern *regexp.Regexp
+
+	resolvedCurrentTransactions *prometheus.Desc
+	resolvedTotalTransactions   *prometheus.Desc
+	resolvedCurrentCacheSize    *prometheus.Desc
+	resolvedTotalCacheHits      *prometheus.Desc
+	resolvedTotalCacheMisses    *prometheus.Desc
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
@@ -192,6 +199,36 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 	unitIncludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitInclude))
 	unitExcludePattern := regexp.MustCompile(fmt.Sprintf("^(?:%s)$", *unitExclude))
 
+	// stats
+	resolvedCurrentTransactions := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_current_transactions"),
+		"Resolved Current Transactions",
+		[]string{"name"}, nil,
+	)
+	resolvedTotalTransactions := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_transactions_total"),
+		"Resolved Total Transactions",
+		[]string{"name"}, nil,
+	)
+
+	resolvedCurrentCacheSize := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_current_cache_size"),
+		"Resolved Current Cache Size",
+		[]string{"name"}, nil,
+	)
+
+	resolvedTotalCacheHits := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_cache_hits_total"),
+		"Resolved Total Cache Hits",
+		[]string{"name"}, nil,
+	)
+
+	resolvedTotalCacheMisses := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_cache_misses_total"),
+		"Resolved Total Cache Misses",
+		[]string{"name"}, nil,
+	)
+
 	// TODO: Build a custom handler to pass in the scrape http context.
 	ctx := context.TODO()
 	return &Collector{
@@ -218,6 +255,12 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		ipEgressPackets:               ipEgressPackets,
 		unitIncludePattern:            unitIncludePattern,
 		unitExcludePattern:            unitExcludePattern,
+
+		resolvedCurrentTransactions: resolvedCurrentTransactions,
+		resolvedTotalTransactions:   resolvedTotalTransactions,
+		resolvedCurrentCacheSize:    resolvedCurrentCacheSize,
+		resolvedTotalCacheHits:      resolvedTotalCacheHits,
+		resolvedTotalCacheMisses:    resolvedTotalCacheMisses,
 	}, nil
 }
 
@@ -246,6 +289,11 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.ipEgressBytes
 	desc <- c.ipIngressPackets
 	desc <- c.ipEgressPackets
+	desc <- c.resolvedCurrentTransactions
+	desc <- c.resolvedTotalTransactions
+	desc <- c.resolvedCurrentCacheSize
+	desc <- c.resolvedTotalCacheHits
+	desc <- c.resolvedTotalCacheMisses
 
 }
 
@@ -262,10 +310,15 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	}
 	defer conn.Close()
 
-	dnsStats := gatherStatsDbus(true)
-	convertedMap := convertMap(dnsStats)
+	if *enableResolvedgMetrics {
+		level.Info(c.logger).Log("msg", "resolved metrics enabled")
+		dnsStats := gatherStatsDbus(true)
 
-	log.With(c.logger, "stats", convertedMap).Log("mgs", "sss")
+		convertedMap := convertMap(dnsStats)
+
+		log.With(c.logger, "stats", convertedMap).Log("mgs", "sss")
+
+	}
 
 	allUnits, err := conn.ListUnitsContext(c.ctx)
 	if err != nil {
@@ -300,8 +353,8 @@ func convertMap(originalMap map[string]float64) map[string]string {
 		// float64を文字列に変換
 		strValue := strconv.FormatFloat(value, 'f', -1, 64)
 		convertedMap[key] = strValue
-		fmt.Println("key:", key)
-		fmt.Println("val:", strValue)
+		// fmt.Println("key:", key)
+		// fmt.Println("val:", strValue)
 	}
 
 	return convertedMap
