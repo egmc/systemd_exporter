@@ -90,6 +90,10 @@ type Collector struct {
 	resolvedCurrentCacheSize    *prometheus.Desc
 	resolvedTotalCacheHits      *prometheus.Desc
 	resolvedTotalCacheMisses    *prometheus.Desc
+	resolvedTotalSecure         *prometheus.Desc
+	resolvedTotalInsecure       *prometheus.Desc
+	resolvedTotalBogus          *prometheus.Desc
+	resolvedTotalIndeterminate  *prometheus.Desc
 }
 
 // NewCollector returns a new Collector exposing systemd statistics.
@@ -210,22 +214,39 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		"Resolved Total Transactions",
 		nil, nil,
 	)
-
 	resolvedCurrentCacheSize := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_current_cache_size"),
 		"Resolved Current Cache Size",
 		nil, nil,
 	)
-
 	resolvedTotalCacheHits := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_cache_hits_total"),
 		"Resolved Total Cache Hits",
 		nil, nil,
 	)
-
 	resolvedTotalCacheMisses := prometheus.NewDesc(
 		prometheus.BuildFQName(namespace, "", "resolved_cache_misses_total"),
 		"Resolved Total Cache Misses",
+		nil, nil,
+	)
+	resolvedTotalSecure := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_dnssec_secure_total"),
+		"Resolved Total number of DNSSEC Verdicts Secure",
+		nil, nil,
+	)
+	resolvedTotalInsecure := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_dnssec_insecure_total"),
+		"Resolved Total number of DNSSEC Verdicts Insecure",
+		nil, nil,
+	)
+	resolvedTotalBogus := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_dnssec_bogus_total"),
+		"Resolved Total number of DNSSEC Verdicts Boguss",
+		nil, nil,
+	)
+	resolvedTotalIndeterminate := prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, "", "resolved_dnssec_indeterminate_total"),
+		"Resolved Total number of DNSSEC Verdicts Indeterminat",
 		nil, nil,
 	)
 
@@ -261,6 +282,10 @@ func NewCollector(logger log.Logger) (*Collector, error) {
 		resolvedCurrentCacheSize:    resolvedCurrentCacheSize,
 		resolvedTotalCacheHits:      resolvedTotalCacheHits,
 		resolvedTotalCacheMisses:    resolvedTotalCacheMisses,
+		resolvedTotalSecure:         resolvedTotalSecure,
+		resolvedTotalInsecure:       resolvedTotalInsecure,
+		resolvedTotalBogus:          resolvedTotalBogus,
+		resolvedTotalIndeterminate:  resolvedTotalIndeterminate,
 	}, nil
 }
 
@@ -294,6 +319,10 @@ func (c *Collector) Describe(desc chan<- *prometheus.Desc) {
 	desc <- c.resolvedCurrentCacheSize
 	desc <- c.resolvedTotalCacheHits
 	desc <- c.resolvedTotalCacheMisses
+	desc <- c.resolvedTotalSecure
+	desc <- c.resolvedTotalInsecure
+	desc <- c.resolvedTotalBogus
+	desc <- c.resolvedTotalIndeterminate
 
 }
 
@@ -386,7 +415,15 @@ func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
 		float64(transactionStats[0]))
 	ch <- prometheus.MustNewConstMetric(c.resolvedTotalTransactions, prometheus.CounterValue,
 		float64(transactionStats[1]))
-
+	dnssecStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalSecure, prometheus.CounterValue,
+		float64(dnssecStats[0]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalInsecure, prometheus.CounterValue,
+		float64(dnssecStats[1]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalBogus, prometheus.CounterValue,
+		float64(dnssecStats[2]))
+	ch <- prometheus.MustNewConstMetric(c.resolvedTotalIndeterminate, prometheus.CounterValue,
+		float64(dnssecStats[3]))
 	return nil
 }
 
