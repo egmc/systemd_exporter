@@ -17,7 +17,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
 
 	// Register pprof-over-http handlers
 	_ "net/http/pprof"
@@ -340,17 +339,10 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	defer conn.Close()
 
 	if *enableResolvedgMetrics {
-		level.Info(c.logger).Log("msg", "resolved metrics enabled")
-		dnsStats := gatherStatsDbus(true)
-
-		convertedMap := convertMap(dnsStats)
-
 		err := c.collectResolvedMetrics(ch)
 		if err != nil {
 			return errors.Wrapf(err, "couldn't get resolved metrics")
 		}
-
-		log.With(c.logger, "stats", convertedMap).Log("mgs", "sss")
 
 	}
 
@@ -380,28 +372,21 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	return nil
 }
 
-func convertMap(originalMap map[string]float64) map[string]string {
-	convertedMap := make(map[string]string)
-
-	for key, value := range originalMap {
-		// float64を文字列に変換
-		strValue := strconv.FormatFloat(value, 'f', -1, 64)
-		convertedMap[key] = strValue
-		// fmt.Println("key:", key)
-		// fmt.Println("val:", strValue)
-	}
-
-	return convertedMap
-}
-
 func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
 
-	conn, _ := godbus.ConnectSystemBus()
+	conn, err := godbus.ConnectSystemBus()
+	if err != nil {
+		return err
+	}
+
 	defer conn.Close()
 
 	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
 
-	cacheStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
+	cacheStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
+	if err != nil {
+		return err
+	}
 
 	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentCacheSize, prometheus.GaugeValue,
 		float64(cacheStats[0]))
@@ -410,12 +395,16 @@ func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
 	ch <- prometheus.MustNewConstMetric(c.resolvedTotalCacheMisses, prometheus.CounterValue,
 		float64(cacheStats[2]))
 
-	transactionStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
+	transactionStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
 	ch <- prometheus.MustNewConstMetric(c.resolvedCurrentTransactions, prometheus.GaugeValue,
 		float64(transactionStats[0]))
 	ch <- prometheus.MustNewConstMetric(c.resolvedTotalTransactions, prometheus.CounterValue,
 		float64(transactionStats[1]))
-	dnssecStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
+	if err != nil {
+		return err
+	}
+
+	dnssecStats, err := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
 	ch <- prometheus.MustNewConstMetric(c.resolvedTotalSecure, prometheus.CounterValue,
 		float64(dnssecStats[0]))
 	ch <- prometheus.MustNewConstMetric(c.resolvedTotalInsecure, prometheus.CounterValue,
@@ -424,36 +413,12 @@ func (c *Collector) collectResolvedMetrics(ch chan<- prometheus.Metric) error {
 		float64(dnssecStats[2]))
 	ch <- prometheus.MustNewConstMetric(c.resolvedTotalIndeterminate, prometheus.CounterValue,
 		float64(dnssecStats[3]))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func gatherStatsDbus(gatherDNSSec bool) map[string]float64 {
-	stats := make(map[string]float64)
-
-	conn, _ := godbus.ConnectSystemBus()
-	defer conn.Close()
-
-	obj := conn.Object("org.freedesktop.resolve1", "/org/freedesktop/resolve1")
-
-	cacheStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.CacheStatistics")
-	stats["Current Cache Size"] = cacheStats[0]
-	stats["Cache Hits"] = cacheStats[1]
-	stats["Cache Misses"] = cacheStats[2]
-
-	transactionStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.TransactionStatistics")
-	stats["Current Transactions"] = transactionStats[0]
-	stats["Total Transactions"] = transactionStats[1]
-
-	if gatherDNSSec {
-		dnssecStats, _ := parseProperty(obj, "org.freedesktop.resolve1.Manager.DNSSECStatistics")
-		stats["Secure"] = dnssecStats[0]
-		stats["Insecure"] = dnssecStats[1]
-		stats["Bogus"] = dnssecStats[2]
-		stats["Indeterminate"] = dnssecStats[3]
-	}
-
-	return stats
-}
 func parseProperty(object godbus.BusObject, path string) (ret []float64, err error) {
 	variant, err := object.GetProperty(path)
 	if err != nil {
