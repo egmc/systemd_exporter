@@ -377,7 +377,7 @@ func (c *Collector) collect(ch chan<- prometheus.Metric) error {
 	if *enableResolvedgMetrics {
 		err := c.collectResolvedMetrics(ch)
 		if err != nil {
-			return errors.Wrapf(err, "couldn't get resolved metrics")
+			level.Warn(c.logger).Log("msg", "couldn't get resolved metrics", "err", err)
 		}
 	}
 
