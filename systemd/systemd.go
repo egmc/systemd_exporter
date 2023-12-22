@@ -44,7 +44,7 @@ var (
 	systemdUser               = kingpin.Flag("systemd.collector.user", "Connect to the user systemd instance.").Bool()
 	enableRestartsMetrics     = kingpin.Flag("systemd.collector.enable-restart-count", "Enables service restart count metrics. This feature only works with systemd 235 and above.").Bool()
 	enableIPAccountingMetrics = kingpin.Flag("systemd.collector.enable-ip-accounting", "Enables service ip accounting metrics. This feature only works with systemd 235 and above.").Bool()
-	enableResolvedgMetrics    = kingpin.Flag("systemd.collector.enable-systemd-resolved-stats", "Enable systemd-resolved statistics").Bool()
+	enableResolvedgMetrics    = kingpin.Flag("systemd.collector.enable-resolved", "Enable systemd-resolved statistics").Bool()
 )
 
 var unitStatesName = []string{"active", "activating", "deactivating", "inactive", "failed"}
